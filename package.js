@@ -1,11 +1,11 @@
 /* eslint-env meteor */
 Package.describe({
-  name: 'leaonline:webapp-factory',
+  name: 'leaonline:http-factory',
   version: '1.0.0',
   // Brief, one-line summary of the package.
-  summary: '',
+  summary: 'Create Meteor connect HTTP middleware. Lightweight. Simple.',
   // URL to the Git repository containing the source code for this package.
-  git: '',
+  git: 'https://github.com/leaonline/http-factory.git',
   // By default, Meteor will default to using README.md for documentation.
   // To avoid submitting documentation, set this field to null.
   documentation: 'README.md'
@@ -15,7 +15,7 @@ Package.onUse(function (api) {
   api.versionsFrom('1.6')
   api.use('ecmascript')
   api.use('leaonline:webapp@1.0.0')
-  api.mainModule('webapp-factory.js')
+  api.mainModule('http-factory.js')
 })
 
 Package.onTest(function (api) {
@@ -30,6 +30,6 @@ Package.onTest(function (api) {
   api.use('mongo')
   api.use('check')
   api.use('meteortesting:mocha')
-  api.use('leaonline:webapp-factory')
-  api.mainModule('webapp-factory-tests.js')
+  api.use('leaonline:http-factory')
+  api.mainModule('http-factory-tests.js')
 })

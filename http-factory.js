@@ -6,7 +6,7 @@ const httpMethods = ['get', 'head', 'post', 'put', 'delete', 'options', 'trace',
 const isMaybeHttpMethod = Match.Where(x => !x || httpMethods.includes(x))
 
 function handleError (res, { error, title, description, code }) {
-  res.writeHead(code, { 'Content-Type': 'application/json' })
+  res.writeHead(code || 500, { 'Content-Type': 'application/json' })
   const body = JSON.stringify({
     title: title,
     description: description,
@@ -45,12 +45,45 @@ function registerHandler ({ app, path, method, handler }) {
   }
 }
 
-export const createHTTPFactory = ({ schemaFactory, isRaw, debug } = {}) => {
+function getRequestParams (req) {
+  switch (req.method.toLowerCase()) {
+    case 'post':
+    case 'put':
+    case 'patch':
+      return Object.assign({}, req.body)
+    case 'get':
+      return Object.assign({}, req.query)
+    default:
+      return Object.assign({}, req.query, req.body)
+  }
+}
+
+function addRequestParams (req, obj) {
+  switch (req.method.toLowerCase()) {
+    case 'post':
+    case 'put':
+    case 'patch':
+      return Object.assign(req.body, obj)
+    case 'get':
+      return Object.assign(req.query, obj)
+    default:
+      Object.assign(req.query, obj)
+      Object.assign(req.body, obj)
+      return Object.assign({}, req.query, req.body)
+  }
+}
+
+export const createHTTPFactory = ({ schemaFactory, isRaw, ...globalMiddleware } = {}) => {
   check(schemaFactory, Match.Maybe(Function))
   check(isRaw, Match.Maybe(Boolean))
 
   const isRequiredSchema = schemaFactory ? Object : Match.Maybe(Object)
   const app = isRaw ? WebApp.rawConnectHandlers : WebApp.connectHandlers
+
+  Object.values(globalMiddleware).forEach(gmw => {
+    check(gmw, Function)
+    registerHandler({ app, handler: gmw })
+  })
 
   return ({ path, schema = {}, method = '', run, validate, ...middleware }) => {
     check(path, Match.Maybe(String))
@@ -61,7 +94,7 @@ export const createHTTPFactory = ({ schemaFactory, isRaw, debug } = {}) => {
 
     Object.values(middleware).forEach(mw => {
       check(mw, Function)
-      registerHandler({ app, path, method, handler: mw.bind({ handleError }) })
+      registerHandler({ app, path, method, handler: mw })
     })
 
     // enable to run validation on the request parameters (query or body)
@@ -84,17 +117,7 @@ export const createHTTPFactory = ({ schemaFactory, isRaw, debug } = {}) => {
       // then we validate the query / body or end
       let requestParams
       try {
-        switch (method.toLowerCase()) {
-          case 'post':
-            requestParams = req.body
-            break
-          case 'get':
-            requestParams = req.query
-            break
-          default:
-            requestParams = Object.assign({}, req.query, req.body)
-            break
-        }
+        requestParams = getRequestParams(req)
         validateFn(requestParams || {})
       } catch (validationError) {
         return handleError(res, {
@@ -112,8 +135,20 @@ export const createHTTPFactory = ({ schemaFactory, isRaw, debug } = {}) => {
         nextCalled = true
         next()
       }
+
+      const environment = {
+        error: ({ error, code, title, description }) => handleError(res, { error, code, title, description }),
+        data: (value) => {
+          if (value) {
+            check(value, Object)
+            requestParams = addRequestParams(req, value)
+          }
+          return requestParams
+        }
+      }
+
       try {
-        result = run.call({ handleError }, requestParams, req, res, nextWrapper)
+        result = run.call(environment, req, res, nextWrapper)
       } catch (invocationError) {
         return handleError(res, {
           error: invocationError,
@@ -123,10 +158,15 @@ export const createHTTPFactory = ({ schemaFactory, isRaw, debug } = {}) => {
         })
       }
 
-      // at this point we skip, because the user has already written the request
+      // at this point we may skip, because the user has already written the request
       // inside the run method on their own behalf
-
       if (nextCalled || res._headerSent) return
+
+      // if the function has no return value,
+      // we assume to pass on to the next handler
+      // this can be skipped if the result would be
+      // explicit, such as null, [], {}, etc.
+      if (typeof result === 'undefined') return next()
 
       res.writeHead(200, { 'Content-Type': 'application/json' })
 
