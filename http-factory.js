@@ -1,16 +1,17 @@
 import { WebApp } from 'meteor/webapp'
 import { check, Match } from 'meteor/check'
+import { EJSON } from 'meteor/ejson'
 
 const isPreflight = req => req.method.toLowerCase() === 'options'
 const httpMethods = ['get', 'head', 'post', 'put', 'delete', 'options', 'trace', 'patch']
 const isMaybeHttpMethod = Match.Where(x => !x || httpMethods.includes(x))
 
-function handleError (res, { error, title, description, code }) {
+function handleError (res, { error, title, description, code, info }) {
   res.writeHead(code || 500, { 'Content-Type': 'application/json' })
   const body = JSON.stringify({
     title: title,
     description: description,
-    info: error && error.message
+    info: info || (error && error.message)
   }, null, 0)
   res.end(body)
 }
@@ -136,15 +137,17 @@ export const createHTTPFactory = ({ schemaFactory, isRaw, ...globalMiddleware } 
         next()
       }
 
+      const pathName = `[${method} ${path}]:`
       const environment = {
-        error: ({ error, code, title, description }) => handleError(res, { error, code, title, description }),
+        error: ({ error, code, title, description, info }) => handleError(res, { error, code, title, description, info }),
         data: (value) => {
           if (value) {
             check(value, Object)
             requestParams = addRequestParams(req, value)
           }
           return requestParams
-        }
+        },
+        log: (...logArgs) => logArgs.unshift(pathName) && console.log.apply(console, logArgs)
       }
 
       try {
@@ -171,7 +174,7 @@ export const createHTTPFactory = ({ schemaFactory, isRaw, ...globalMiddleware } 
       res.writeHead(200, { 'Content-Type': 'application/json' })
 
       if (typeof result !== 'string') {
-        return res.end(JSON.stringify(result))
+        return res.end(EJSON.stringify(result))
       } else {
         return res.end(result)
       }

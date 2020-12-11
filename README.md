@@ -513,7 +513,12 @@ We use `meteortesting:mocha` to run our tests on the package.
 $ TEST_WATCH=1 TEST_CLIENT=0 meteor test-packages ./ --driver-package meteortesting:mocha
 ```
 
-##### Cli mode
+
+## Changelog
+
+- **1.0.1**
+  - use `EJSON` to stringify results in order to comply with any formats, that
+    can be resolved via EJSON
 
 ## License
 

@@ -1,7 +1,7 @@
 /* eslint-env meteor */
 Package.describe({
   name: 'leaonline:http-factory',
-  version: '1.0.0',
+  version: '1.0.1',
   // Brief, one-line summary of the package.
   summary: 'Create Meteor connect HTTP middleware. Lightweight. Simple.',
   // URL to the Git repository containing the source code for this package.
@@ -13,9 +13,8 @@ Package.describe({
 
 Package.onUse(function (api) {
   api.versionsFrom('1.6')
-  api.use('ecmascript')
-  api.use('leaonline:webapp@1.0.0')
-  api.mainModule('http-factory.js')
+  api.use([ 'ecmascript', 'ejson', 'leaonline:webapp@1.0.0' ], 'server')
+  api.mainModule('http-factory.js', 'server')
 })
 
 Package.onTest(function (api) {
@@ -31,5 +30,5 @@ Package.onTest(function (api) {
   api.use('check')
   api.use('meteortesting:mocha')
   api.use('leaonline:http-factory')
-  api.mainModule('http-factory-tests.js')
+  api.mainModule('http-factory-tests.js', 'server')
 })
