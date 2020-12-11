@@ -13,6 +13,40 @@ types of HTTP routes.
 
 **Minified size < 2KB!**
 
+## Table of Contents
+
+<!-- START doctoc generated TOC please keep comment here to allow auto update -->
+<!-- DON'T EDIT THIS SECTION, INSTEAD RE-RUN doctoc TO UPDATE -->
+
+- [Why do I want this?](#why-do-i-want-this)
+- [Installation](#installation)
+- [Usage](#usage)
+  - [Basic example](#basic-example)
+  - [Use `WebApp.rawConnectHandlers`](#use-webapprawconnecthandlers)
+  - [Create universal handlers](#create-universal-handlers)
+  - [Specify a method](#specify-a-method)
+  - [Passing data to the next handler](#passing-data-to-the-next-handler)
+- [Responding with errors](#responding-with-errors)
+  - [Throwing 500 errors](#throwing-500-errors)
+  - [Handle custom error responses](#handle-custom-error-responses)
+- [With schema](#with-schema)
+    - [Using SimpleSchema](#using-simpleschema)
+    - [Overriding `validate` when using schema](#overriding-validate-when-using-schema)
+    - [Using check](#using-check)
+- [Using middleware](#using-middleware)
+  - [Define global middleware](#define-global-middleware)
+  - [Define route-specific middleware](#define-route-specific-middleware)
+  - [Define middleware using the internal environment](#define-middleware-using-the-internal-environment)
+- [Codestyle](#codestyle)
+      - [via npm](#via-npm)
+      - [via Meteor npm](#via-meteor-npm)
+- [Test](#test)
+      - [Watch mode](#watch-mode)
+- [Changelog](#changelog)
+- [License](#license)
+
+<!-- END doctoc generated TOC please keep comment here to allow auto update -->
+
 ## Why do I want this?
 
 - Decouple definition from instantiation
