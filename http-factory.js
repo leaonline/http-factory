@@ -74,24 +74,50 @@ function addRequestParams (req, obj) {
   }
 }
 
-export const createHTTPFactory = ({ schemaFactory, isRaw, ...globalMiddleware } = {}) => {
+/**
+ * Creates a new factory for HTTP routes with global settings
+ * @param schemaFactory {function?} optional function to validate arguments by schema
+ * @param onError {function?} optional global error handler for any route errors
+ * @param isRaw {boolean?} optional, attach on raw connect handlers if true
+ * @param globalMiddleware {any} optional global mixins of custom middleware functions
+ * @return {function({path?: *, schema?: *, method?: *, run?: *, validate?: *, onError?: *, middleware?: *}): handler}
+ *  a factory-method to create all routes by given configs
+ */
+export const createHTTPFactory = ({ schemaFactory, onError, isRaw, ...globalMiddleware } = {}) => {
   check(schemaFactory, Match.Maybe(Function))
+  check(onError, Match.Maybe(Function))
   check(isRaw, Match.Maybe(Boolean))
 
   const isRequiredSchema = schemaFactory ? Object : Match.Maybe(Object)
   const app = isRaw ? WebApp.rawConnectHandlers : WebApp.connectHandlers
+  const globalErrorHook = onError || (() => {})
 
   Object.values(globalMiddleware).forEach(gmw => {
     check(gmw, Function)
     registerHandler({ app, handler: gmw })
   })
 
-  return ({ path, schema = {}, method = '', run, validate, ...middleware }) => {
+  /**
+   *
+   * @param path
+   * @param schema
+   * @param method
+   * @param run
+   * @param validate
+   * @param onError
+   * @param middleware
+   * @return {handler}
+   */
+  const routeHandler = ({ path, schema = {}, method = '', run, validate, onError, ...middleware }) => {
     check(path, Match.Maybe(String))
     check(schema, isRequiredSchema)
     check(method, isMaybeHttpMethod)
     check(validate, Match.Maybe(Function))
+    check(onError, Match.Maybe(Function))
     check(run, Function)
+
+    const localErrorHook = onError || globalErrorHook
+    const errorHook = async e => localErrorHook(e, method, path)
 
     Object.values(middleware).forEach(mw => {
       check(mw, Function)
@@ -121,6 +147,8 @@ export const createHTTPFactory = ({ schemaFactory, isRaw, ...globalMiddleware } 
         requestParams = getRequestParams(req)
         validateFn(requestParams || {})
       } catch (validationError) {
+        errorHook(validationError)
+
         return handleError(res, {
           error: validationError,
           code: 400,
@@ -139,7 +167,26 @@ export const createHTTPFactory = ({ schemaFactory, isRaw, ...globalMiddleware } 
 
       const pathName = `[${method} ${path}]:`
       const environment = {
-        error: ({ error, code, title, description, info }) => handleError(res, { error, code, title, description, info }),
+        /**
+         * resume the route with error code, logging is off by default
+         * @param error
+         * @param code
+         * @param title
+         * @param description
+         * @param info
+         * @param logError
+         */
+        error: ({ error, code, title, description, info }) => {
+          errorHook(error)
+          handleError(res, { error, code, title, description, info })
+        },
+
+        /**
+         * Return the current route data from query or body or add it to
+         * them for the next middleware
+         * @param value {Object} optional, name of the value object
+         * @return {object} the current params of the request
+         */
         data: (value) => {
           if (value) {
             check(value, Object)
@@ -147,12 +194,20 @@ export const createHTTPFactory = ({ schemaFactory, isRaw, ...globalMiddleware } 
           }
           return requestParams
         },
-        log: (...logArgs) => logArgs.unshift(pathName) && console.log.apply(console, logArgs)
+        /**
+         * Logs args to to the console
+         * @param logArgs
+         */
+        log: (...logArgs) => {
+          logArgs.unshift(pathName) && console.log.apply(console, logArgs)
+        }
       }
 
       try {
         result = run.call(environment, req, res, nextWrapper)
       } catch (invocationError) {
+        errorHook(invocationError)
+
         return handleError(res, {
           error: invocationError,
           code: 500,
@@ -183,4 +238,7 @@ export const createHTTPFactory = ({ schemaFactory, isRaw, ...globalMiddleware } 
     registerHandler({ app, method, path, handler })
     return handler
   }
+
+  // finally return route handler
+  return routeHandler
 }

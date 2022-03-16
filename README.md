@@ -517,6 +517,43 @@ createHttpRoute({
 })
 ```
 
+### Hooks
+
+You can currently only hook into error handling:
+
+```javascript
+import { Meteor } from 'meteor/meteor'
+import { createHTTPFactory } from 'meteor/leaonline:http-factory'
+
+const createHttpRoute = createHTTPFactory({
+  // global error hook for all routes
+  onError: e => {
+    MyCoolLogger.error(e)
+  }
+})
+
+createHttpRoute({
+  path: '/greetings',
+  method: 'get',
+  run: simpleAuthInternal,
+  // local error hook only for this route, note
+  // that this route will now use only this hook and not
+  // the global hook, if such is defined
+  onError: e => {
+    MyCoolLogger.error(e)
+  }
+})
+ 
+createHttpRoute({
+  path: '/greetings',
+  method: 'get',
+  run: function () {
+    const { name } = this.data()
+    return `Hello, ${name}`
+  }
+})
+```
+
 
 ## Codestyle
 
@@ -550,6 +587,9 @@ $ TEST_WATCH=1 TEST_CLIENT=0 meteor test-packages ./ --driver-package meteortest
 
 ## Changelog
 
+- **1.1.0**
+  - fix: tests when run method returns undefined values or no value (=undefined)
+  - feature: `onError` hook can be attached to global factory and factories 
 - **1.0.1**
   - use `EJSON` to stringify results in order to comply with any formats, that
     can be resolved via EJSON

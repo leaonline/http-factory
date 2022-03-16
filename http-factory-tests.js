@@ -5,6 +5,7 @@ import { WebApp } from 'meteor/webapp'
 import { Mongo } from 'meteor/mongo'
 import { Random } from 'meteor/random'
 import { HTTP } from 'meteor/http'
+import { HTTP as HTTP2 } from 'meteor/jkuester:http'
 import { createHTTPFactory } from 'meteor/leaonline:http-factory'
 import { expect } from 'chai'
 import bodyParser from 'body-parser'
@@ -160,16 +161,21 @@ describe('defaults, no params', function () {
   ;['get', 'head', 'post', 'put', 'delete', 'options', 'trace', 'patch'].forEach(method => {
     it(`creates a http ${method} route with minimal params`, function (done) {
       const createHttpRoute = createHTTPFactory()
-
       createHttpRoute({
         path: randomPath,
         method: method,
-        run: function () {}
+        run: function () { return null }
       })
 
-      HTTP.call(method, toUrl(randomPath), (err, res) => {
-        expect(err).to.equal(null)
-        expect(res.statusCode).to.equal(200)
+      const url = toUrl(randomPath)
+
+      HTTP.call(method, url, (err, res) => {
+        try {
+          expect(err).to.equal(null)
+          expect(res.statusCode).to.equal(200)
+        } catch (assertionError) {
+          return done(assertionError)
+        }
         done()
       })
     })
@@ -336,7 +342,92 @@ describe('with schema', function () {
     HTTP.post(toUrl(randomPath), { params: {} }, (err, res) => {
       expect(err).to.equal(null)
       expect(res.statusCode).to.equal(200)
-      expect(res.content).to.equal(JSON.stringify({ testId, otherId: undefined }))
+      expect(res.content).to.equal(JSON.stringify({
+        testId,
+        otherId: undefined
+      }))
+      done()
+    })
+  })
+})
+
+describe('with error handler', function () {
+  let randomPath
+  let errorId
+
+  beforeEach(function () {
+    randomPath = createRandomPath()
+    errorId = Random.id()
+  })
+
+  it('allows to pass global onError', function (done) {
+    let hooked = false
+    const createHttpRoute = createHTTPFactory({
+      onError: e => {
+        expect(e.message).to.equal(errorId)
+        hooked = true
+      }
+    })
+
+    createHttpRoute({
+      path: randomPath,
+      run: function () {
+        throw new Error(errorId)
+      }
+    })
+
+    HTTP.get(toUrl(randomPath), (err, res) => {
+      expect(res.statusCode).to.equal(500)
+      expect(err.response.data.info).to.equal(errorId)
+      expect(hooked).to.equal(true)
+      done()
+    })
+  })
+
+  it('allows to pass local onError', function (done) {
+    let hooked = false
+    const createHttpRoute = createHTTPFactory()
+
+    createHttpRoute({
+      path: randomPath,
+      run: function () {
+        throw new Error(errorId)
+      },
+      onError: e => {
+        expect(e.message).to.equal(errorId)
+        hooked = true
+      }
+    })
+
+    HTTP.get(toUrl(randomPath), (err, res) => {
+      expect(res.statusCode).to.equal(500)
+      expect(err.response.data.info).to.equal(errorId)
+      expect(hooked).to.equal(true)
+      done()
+    })
+  })
+
+  it('allows to override global onError with local onError', function (done) {
+    let hooked = false
+    const createHttpRoute = createHTTPFactory({
+      onError: () => {}
+    })
+
+    createHttpRoute({
+      path: randomPath,
+      run: function () {
+        throw new Error(errorId)
+      },
+      onError: e => {
+        expect(e.message).to.equal(errorId)
+        hooked = true
+      }
+    })
+
+    HTTP.get(toUrl(randomPath), (err, res) => {
+      expect(res.statusCode).to.equal(500)
+      expect(err.response.data.info).to.equal(errorId)
+      expect(hooked).to.equal(true)
       done()
     })
   })
@@ -404,7 +495,6 @@ describe('define middleware', function () {
       expect(res.content).to.equal(testId)
     })
 
-
     HTTP.post(toUrl(randomPath), (err, res) => {
       const error = err.response
       expect(error.statusCode).to.equal(403)
@@ -421,7 +511,7 @@ describe('define middleware', function () {
     })
   })
 
-  it ('allows to define middleware as internal', function (done) {
+  it('allows to define middleware as internal', function (done) {
     const createHttpRoute = createHTTPFactory()
 
     createHttpRoute({
@@ -469,7 +559,7 @@ describe('define middleware', function () {
     })
   })
 
-  it ('allows to add middleware on a global level', function (done) {
+  it('allows to add middleware on a global level', function (done) {
     const createHttpRoute = createHTTPFactory({
       simpleAuth: simpleAuthExternal
     })
