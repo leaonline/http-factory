@@ -7,19 +7,19 @@ const httpMethods = ['get', 'head', 'post', 'put', 'delete', 'options', 'trace',
 const isMaybeHttpMethod = Match.Where(x => !x || httpMethods.includes(x))
 
 function handleError (res, { error, title, description, code, info }) {
-  res.writeHead(code || 500, { 'Content-Type': 'application/json' })
-  const body = JSON.stringify({
+  res.status(code || 500)
+  res.set({ 'Content-Type': 'application/json' })
+  res.json({
     title: title,
     description: description,
     info: info || (error && error.message)
-  }, null, 0)
-  res.end(body)
+  })
 }
 
 function registerHandler ({ app, path, method, handler }) {
   // ensure the method exists
   if (method && !Object.prototype.hasOwnProperty.call(app, method)) {
-    app.defineMethod(method)
+    throw new TypeError(`Undefined method "${method}"`)
   }
 
   const args = []
@@ -41,36 +41,10 @@ function registerHandler ({ app, path, method, handler }) {
       return app.trace(...args)
     case 'patch':
       return app.patch(...args)
+    case 'delete':
+      return app.delete(...args)
     default:
       return app.use(...args)
-  }
-}
-
-function getRequestParams (req) {
-  switch (req.method.toLowerCase()) {
-    case 'post':
-    case 'put':
-    case 'patch':
-      return Object.assign({}, req.body)
-    case 'get':
-      return Object.assign({}, req.query)
-    default:
-      return Object.assign({}, req.query, req.body)
-  }
-}
-
-function addRequestParams (req, obj) {
-  switch (req.method.toLowerCase()) {
-    case 'post':
-    case 'put':
-    case 'patch':
-      return Object.assign(req.body, obj)
-    case 'get':
-      return Object.assign(req.query, obj)
-    default:
-      Object.assign(req.query, obj)
-      Object.assign(req.body, obj)
-      return Object.assign({}, req.query, req.body)
   }
 }
 
@@ -89,7 +63,7 @@ export const createHTTPFactory = ({ schemaFactory, onError, isRaw, ...globalMidd
   check(isRaw, Match.Maybe(Boolean))
 
   const isRequiredSchema = schemaFactory ? Object : Match.Maybe(Object)
-  const app = isRaw ? WebApp.rawConnectHandlers : WebApp.connectHandlers
+  const app = isRaw ? WebApp.rawHandlers : WebApp.handlers
   const globalErrorHook = onError || (() => {})
 
   Object.values(globalMiddleware).forEach(gmw => {
@@ -134,20 +108,26 @@ export const createHTTPFactory = ({ schemaFactory, onError, isRaw, ...globalMidd
       }
     }
 
-    const handler = function (req, res, next) {
+    const handler = async function (req, res, next) {
       // end the request here, if it's a preflight
       if (isPreflight(req)) {
-        res.writeHead(200)
+        res.status(200)
         return res.end()
       }
 
       // then we validate the query / body or end
       let requestParams
       try {
-        requestParams = getRequestParams(req)
+        requestParams = {
+          ...req.params,
+          ...req.body,
+          ...req.query
+        }
+        console.debug({ requestParams })
+        console.debug(schema)
         validateFn(requestParams || {})
       } catch (validationError) {
-        errorHook(validationError)
+        await errorHook(validationError)
 
         return handleError(res, {
           error: validationError,
@@ -176,24 +156,17 @@ export const createHTTPFactory = ({ schemaFactory, onError, isRaw, ...globalMidd
          * @param info
          * @param logError
          */
-        error: ({ error, code, title, description, info }) => {
-          errorHook(error)
+        error: async ({ error, code, title, description, info }) => {
+          await errorHook(error)
           handleError(res, { error, code, title, description, info })
         },
 
         /**
          * Return the current route data from query or body or add it to
          * them for the next middleware
-         * @param value {Object} optional, name of the value object
          * @return {object} the current params of the request
          */
-        data: (value) => {
-          if (value) {
-            check(value, Object)
-            requestParams = addRequestParams(req, value)
-          }
-          return requestParams
-        },
+        data: () => requestParams,
         /**
          * Logs args to to the console
          * @param logArgs
@@ -204,9 +177,9 @@ export const createHTTPFactory = ({ schemaFactory, onError, isRaw, ...globalMidd
       }
 
       try {
-        result = run.call(environment, req, res, nextWrapper)
+        result = await run.call(environment, req, res, nextWrapper)
       } catch (invocationError) {
-        errorHook(invocationError)
+        await errorHook(invocationError)
 
         return handleError(res, {
           error: invocationError,
@@ -218,7 +191,7 @@ export const createHTTPFactory = ({ schemaFactory, onError, isRaw, ...globalMidd
 
       // at this point we may skip, because the user has already written the request
       // inside the run method on their own behalf
-      if (nextCalled || res._headerSent) return
+      if (nextCalled || res.headersSent) return
 
       // if the function has no return value,
       // we assume to pass on to the next handler
@@ -226,13 +199,11 @@ export const createHTTPFactory = ({ schemaFactory, onError, isRaw, ...globalMidd
       // explicit, such as null, [], {}, etc.
       if (typeof result === 'undefined') return next()
 
-      res.writeHead(200, { 'Content-Type': 'application/json' })
+      res.status(200)
+      res.set({ 'Content-Type': 'application/json' })
 
-      if (typeof result !== 'string') {
-        return res.end(EJSON.stringify(result))
-      } else {
-        return res.end(result)
-      }
+      const body = EJSON.stringify(result)
+      return res.send(body)
     }
 
     registerHandler({ app, method, path, handler })

@@ -5,7 +5,7 @@
 ![GitHub file size in bytes](https://img.shields.io/github/size/leaonline/http-factory/http-factory.js)
 ![GitHub](https://img.shields.io/github/license/leaonline/http-factory)
 
-Create Meteor `WebApp` (connect) HTTP middleware. Lightweight. Simple.
+Create Meteor `WebApp` (express) HTTP middleware. Lightweight. Simple.
 
 With this package you can define factory functions to create a variety of Meteor HTTP routes.
 Decouples definition from instantiation (also for the schema) and allows different configurations for different
@@ -52,8 +52,8 @@ types of HTTP routes.
 - Decouple definition from instantiation
 - Easy management between own and externally defined middleware on a local or global level
 - Validate http request arguments (query/body) the same way as you do with `mdg:validated-method`
-- Just pass in the schema as plain object, instead of manually instantiating `SimpleSchema`
-- Easy builtin reponse schema, allowing you to either return a value (to create 200 responses) or throw an Error 
+- Just pass in the schema as plain object, instead of manually instantiating a new `SimpleSchema` instance
+- Easy builtin response schema, allowing you to either return a value (to create 200 responses) or throw an Error 
 (for 500 responses). You can still customize responses via `req`, `res` and `next`.
 - Easy data access and update between handlers using `this.data()` 
 
