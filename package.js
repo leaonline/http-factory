@@ -12,24 +12,23 @@ Package.describe({
 })
 
 Package.onUse(function (api) {
-  api.versionsFrom(['1.6', '2.8.1', '3.0.1', '3.4'])
+  api.versionsFrom(['3.0.1', '3.4'])
   api.use(['ecmascript', 'ejson', 'webapp'], 'server')
   api.mainModule('http-factory.js', 'server')
 })
 
 Package.onTest(function (api) {
-  api.versionsFrom(['1.6', '2.8.1', '3.0.1', '3.4'])
+  api.versionsFrom(['3.0.1', '3.4'])
   Npm.depends({
     chai: '4.2.0',
     'simpl-schema': '1.13.1',
-    'body-parser': '1.20.2'
   })
 
   api.use('ecmascript')
   api.use('random')
   api.use('mongo')
   api.use('check')
-  api.use('meteortesting:mocha')
+  api.use('meteortesting:mocha@3.3.0')
   api.use('leaonline:http-factory')
   api.mainModule('http-factory-tests.js', 'server')
 })
