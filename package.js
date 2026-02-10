@@ -21,7 +21,7 @@ Package.onTest(function (api) {
   api.versionsFrom(['3.0.1', '3.4'])
   Npm.depends({
     chai: '4.2.0',
-    'simpl-schema': '1.13.1',
+    'simpl-schema': '1.13.1'
   })
 
   api.use('ecmascript')
