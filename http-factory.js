@@ -5,13 +5,13 @@ import { EJSON } from 'meteor/ejson'
 const isPreflight = req => req.method.toLowerCase() === 'options'
 const httpMethods = ['get', 'head', 'post', 'put', 'delete', 'options', 'trace', 'patch']
 const isMaybeHttpMethod = Match.Where(x => !x || httpMethods.includes(x))
-
+const noop = () => {}
 function handleError (res, { error, title, description, code, info }) {
   res.status(code || 500)
   res.set({ 'Content-Type': 'application/json' })
   res.json({
-    title: title,
-    description: description,
+    title,
+    description,
     info: info || (error && error.message)
   })
 }
@@ -57,14 +57,15 @@ function registerHandler ({ app, path, method, handler }) {
  * @return {function({path?: *, schema?: *, method?: *, run?: *, validate?: *, onError?: *, middleware?: *}): handler}
  *  a factory-method to create all routes by given configs
  */
-export const createHTTPFactory = ({ schemaFactory, onError, isRaw, ...globalMiddleware } = {}) => {
+export const createHTTPFactory = ({ schemaFactory, onError, isRaw, debug: globalDebug, ...globalMiddleware } = {}) => {
   check(schemaFactory, Match.Maybe(Function))
   check(onError, Match.Maybe(Function))
   check(isRaw, Match.Maybe(Boolean))
+  check(globalDebug, Match.Maybe(Function))
 
   const isRequiredSchema = schemaFactory ? Object : Match.Maybe(Object)
   const app = isRaw ? WebApp.rawHandlers : WebApp.handlers
-  const globalErrorHook = onError || (() => {})
+  const globalErrorHook = onError ?? noop
 
   Object.values(globalMiddleware).forEach(gmw => {
     check(gmw, Function)
@@ -82,51 +83,54 @@ export const createHTTPFactory = ({ schemaFactory, onError, isRaw, ...globalMidd
    * @param middleware
    * @return {handler}
    */
-  const routeHandler = ({ path, schema = {}, method = '', run, validate, onError, ...middleware }) => {
+  const routeHandler = ({ path, schema = {}, method = '', run, validate, onError, debug: localDebug, ...middleware }) => {
     check(path, Match.Maybe(String))
     check(schema, isRequiredSchema)
     check(method, isMaybeHttpMethod)
     check(validate, Match.Maybe(Function))
     check(onError, Match.Maybe(Function))
     check(run, Function)
+    check(localDebug, Match.Maybe(Function))
 
+    const debug = localDebug ?? globalDebug ?? (() => {})
     const localErrorHook = onError || globalErrorHook
     const errorHook = async e => localErrorHook(e, method, path)
 
     Object.values(middleware).forEach(mw => {
       check(mw, Function)
+      debug(`[${method} ${path}]: Registering middleware`, mw)
       registerHandler({ app, path, method, handler: mw })
     })
 
     // enable to run validation on the request parameters (query or body)
 
-    let validateFn = validate || (() => {})
+    let validateFn = validate ?? noop
     if (!validate && schemaFactory) {
+      debug(`[${method} ${path}]: Creating validation schemaasync () => {`, schema)
       const validationSchema = schemaFactory(schema)
       validateFn = function (document = {}) {
+        debug(`[${method} ${path}]: Validating request parameters with schemaasync () => {`, document)
         validationSchema.validate(document)
       }
     }
 
     const handler = async function (req, res, next) {
       // end the request here, if it's a preflight
+      // debug(`[${method} ${path}]: Received request`, req)
       if (isPreflight(req)) {
+        debug(`[${method} ${path}]: Handling preflight request`)
         res.status(200)
         return res.end()
       }
 
       // then we validate the query / body or end
-      let requestParams
       try {
-        requestParams = {
-          ...req.params,
-          ...req.body,
-          ...req.query
-        }
-        console.debug({ requestParams })
-        console.debug(schema)
-        validateFn(requestParams || {})
+        req.data = req.data ?? {}
+        Object.assign(req.data, req.query, req.params, req.body)
+        debug(`[${method} ${path}]: Validating request parameters`, req.data)
+        validateFn(req.data || {})
       } catch (validationError) {
+        debug(`[${method} ${path}]: Validation error`, validationError.message)
         await errorHook(validationError)
 
         return handleError(res, {
@@ -164,9 +168,17 @@ export const createHTTPFactory = ({ schemaFactory, onError, isRaw, ...globalMidd
         /**
          * Return the current route data from query or body or add it to
          * them for the next middleware
+         * @param value {object?} optional object to add to the current params of the request
          * @return {object} the current params of the request
          */
-        data: () => requestParams,
+        data: (value) => {
+          if (typeof value === 'object' && value !== null) {
+            debug(`[${method} ${path}]: Adding data to request parameters`, value)
+            Object.assign(req.data, value)
+          }
+          debug(`[${method} ${path}]: Getting request parameters`, req.data)
+          return { ...req.data } // always return copy of data
+        },
         /**
          * Logs args to to the console
          * @param logArgs
@@ -176,6 +188,7 @@ export const createHTTPFactory = ({ schemaFactory, onError, isRaw, ...globalMidd
         }
       }
 
+      debug(`[${method} ${path}]: calling route handlerasync () => {`)
       try {
         result = await run.call(environment, req, res, nextWrapper)
       } catch (invocationError) {
@@ -201,9 +214,7 @@ export const createHTTPFactory = ({ schemaFactory, onError, isRaw, ...globalMidd
 
       res.status(200)
       res.set({ 'Content-Type': 'application/json' })
-
-      const body = EJSON.stringify(result)
-      return res.send(body)
+      return res.send(EJSON.stringify(result))
     }
 
     registerHandler({ app, method, path, handler })
