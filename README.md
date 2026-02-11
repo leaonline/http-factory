@@ -5,7 +5,7 @@
 ![GitHub file size in bytes](https://img.shields.io/github/size/leaonline/http-factory/http-factory.js)
 ![GitHub](https://img.shields.io/github/license/leaonline/http-factory)
 
-Create Meteor `WebApp` (connect) HTTP middleware. Lightweight. Simple.
+Create Meteor `WebApp` (express) HTTP middleware. Lightweight. Simple.
 
 With this package you can define factory functions to create a variety of Meteor HTTP routes.
 Decouples definition from instantiation (also for the schema) and allows different configurations for different
@@ -52,8 +52,8 @@ types of HTTP routes.
 - Decouple definition from instantiation
 - Easy management between own and externally defined middleware on a local or global level
 - Validate http request arguments (query/body) the same way as you do with `mdg:validated-method`
-- Just pass in the schema as plain object, instead of manually instantiating `SimpleSchema`
-- Easy builtin reponse schema, allowing you to either return a value (to create 200 responses) or throw an Error 
+- Just pass in the schema as plain object, instead of manually instantiating a new `SimpleSchema` instance
+- Easy builtin response schema, allowing you to either return a value (to create 200 responses) or throw an Error 
 (for 500 responses). You can still customize responses via `req`, `res` and `next`.
 - Easy data access and update between handlers using `this.data()` 
 
@@ -63,7 +63,16 @@ types of HTTP routes.
 Simply add this package to your meteor packages
 
 ```bash
-$ meteor add leaonline:http-factory
+meteor add leaonline:http-factory
+```
+
+**Enable encoded URLs and JSON body parsing**
+
+```javascript
+import { WebApp } from 'meteor/webapp'
+
+WebApp.express.urlencoded({ extended: true })
+WebApp.handlers.use(WebApp.express.json())
 ```
 
 ## Usage
@@ -100,16 +109,15 @@ This code creates a http route, that is handled on any incoming HTTP request (`g
 or on body (depending on request type) to find a parameter, named `name`. Try it via the following client code:
 
 ```javascript
-import { HTTP } from 'meteor/http'
+import { fetch } from 'meteor/fetch'
 
-HTTP.get('/greetings', { params: { name: 'Ada' }}, (err, res) => {
-  console.log(res.content) // 'Hello, Ada'
-})
+const res = await fetch('/greetings', { params: { name: 'Ada' }})
+await res.text() // 'Hello, Ada'
 ```
 
-### Use `WebApp.rawConnectHandlers`
+### Use `WebApp.rawHandlers`
 
-If you need to define handlers before any other handler, just pass in the `raw` option:
+If you need to define handlers before any other handler (even Meteor-internal), just pass in the `raw` option:
 
 ```javascript
 import { createHTTPFactory } from 'meteor/leaonline:http-factory'
@@ -125,6 +133,9 @@ createHttpRoute({
 })
 ``` 
 
+Beware, though this may have side effects on other packages and core functionality,
+that expect to run before your handler.
+
 ### Create universal handlers
 
 You can omit `path` on order to run the handler at the root level. This is often used for
@@ -138,9 +149,6 @@ request will only be handled with the correct request method:
 ```javascript
 import { WebApp } from 'meteor/webapp'
 import { createHTTPFactory } from 'meteor/leaonline:http-factory'
-import bodyParser from 'body-parser'
-
-WebApp.connectHandlers.urlEncoded(bodyParser /*, options */) // inject body parser
 
 const createHttpRoute = createHTTPFactory() // default, no params
 createHttpRoute({
@@ -199,13 +207,19 @@ If you call the route, it will contain now the updated data:
 ```javascript
 import { HTTP } from 'meteor/http'
 
-HTTP.get('/greetings', { params: { name: 'Ada' }}, (err, res) => {
-  console.log(res.content) // 'Hello, Mrs. Ada'
-})
+const url = (path, params) => {
+  const query = new URLSearchParams().toString()
+  for (const key of Object.keys(params)) {
+    query.append(key, params[key])
+  }
+  return `${path}?${query}`
+}
 
-HTTP.get('/greetings', { params: { name: 'Bob' }}, (err, res) => {
-  console.log(res.content) // 'Hello, Mr. Ada'
-})
+let res = await fetch(url('/greetings', { name: 'Ada' }))
+await res.text() // 'Hello, Mrs. Ada'
+
+res = await fetch(url('/greetings', { name: 'Bob' }))
+await res.text() // 'Hello, Mr. Bob'
 ```
 
 ## Responding with errors
@@ -236,13 +250,12 @@ The `err` param in the callback will then not be `null` but contain the error re
 ```javascript
 import { HTTP } from 'meteor/http'
 
-HTTP.get('/greetings', {}, (err, res) => {
-  const error = err.response
-  console.log(error.statusCode) // 500
-  console.log(error.data.title) // 'Internal Server Error'
-  console.log(error.data.description) // 'An unintended error occurred.'
-  console.log(error.data.info) // Expected name
-})
+const res = await fetch('/greetings', {})
+const error = await res.json()
+console.log(res.status) // 500
+console.log(error.title) // 'Internal Server Error'
+console.log(error.description) // 'An unintended error occurred.'
+console.log(error.info) // Expected name
 ```
 
 ### Handle custom error responses
@@ -302,21 +315,19 @@ createHttpRoute({
 Call the method via
 
 ```javascript
-HTTP.get('/greetings', { params: { name: 'Ada' }}, (err, res) => {
-  console.log(res.content) // 'Hello, Ada'
-})
+const res = await fetch('/greetings', { params: { name: 'Ada' }})
+await res.text() // 'Hello, Ada'
 ```
 
 provoke a fail via
 
 ```javascript
-HTTP.get('/greetings', (err, res) => {
-  const error = err.response
-  console.log(error.statusCode) // 400
-  console.log(error.data.title) // 'Bad request'
-  console.log(error.data.description) // 'Malformed query or body.'
-  console.log(error.data.info) // Name is required <-- SimpleSchema error message
-})
+const res = await fetch('/greetings')
+const error = await res.json()
+console.log(error.status) // 400
+console.log(error.title) // 'Bad request'
+console.log(error.description) // 'Malformed query or body.'
+console.log(error.info) // Name is required <-- SimpleSchema error message
 ```
 
 #### Overriding `validate` when using schema
@@ -348,9 +359,8 @@ and then call via
 
 
 ```javascript
-HTTP.get('/greetings', (err, res) => {
-  console.log(res.content) // 'Hello, undefined'
-})
+const res = await fetch('/greetings')
+await res.text() // 'Hello, undefined'
 ```
 
 If none of these cover your use case, you can still create your own validation middleware.
@@ -438,17 +448,15 @@ createHttpRoute({
 now your  requests will run through this middleware:
 
 ```javascript
-HTTP.get('/greetings', (err, res) => {
-  const error = err.response
-  console.log(error.statusCode) // 403
-  console.log(errpr.data.title) // 'Permission Denid'
-})
+const res = await fetch('/greetings')
+const error = await res.json()
+console.log(error.status) // 403
+console.log(error.title) // 'Permission Denid'
 
 const params = { name: 'Ada' }
 const headers = { 'x-auth-token': Meteor.settings.xAuthToken } // warning: passing secrets to the client is unsafe
-HTTP.get('/greetings', { params, headers }, (err, res) => {
-  console.log(res.content) // Hello, Ada
-})
+const res = await fetch('/greetings', { params, headers })
+await res.text() // Hello, Ada
 ```
 
 ### Define route-specific middleware
@@ -562,15 +570,15 @@ We use `standard` as code style and for linting.
 ##### via npm
 
 ```bash
-$ npm install --global standard snazzy
-$ standard | snazzy
+npm install --global standard snazzy
+standard | snazzy
 ```
 
 ##### via Meteor npm
 
 ```bash
-$ meteor npm install --global standard snazzy
-$ standard | snazzy
+meteor npm install --global standard snazzy
+standard | snazzy
 ```
 
 
@@ -581,12 +589,13 @@ We use `meteortesting:mocha` to run our tests on the package.
 ##### Watch mode
 
 ```bash
-$ TEST_WATCH=1 TEST_CLIENT=0 meteor test-packages ./ --driver-package meteortesting:mocha
+TEST_WATCH=1 TEST_CLIENT=0 meteor test-packages ./ --raw-logs --driver-package meteortesting:mocha
 ```
 
 
 ## Changelog
-
+- **2.0.0**
+  - Meteor 3 compatibility (breaking)
 - **1.1.0**
   - fix: tests when run method returns undefined values or no value (=undefined)
   - feature: `onError` hook can be attached to global factory and factories 

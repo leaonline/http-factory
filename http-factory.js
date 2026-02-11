@@ -5,21 +5,21 @@ import { EJSON } from 'meteor/ejson'
 const isPreflight = req => req.method.toLowerCase() === 'options'
 const httpMethods = ['get', 'head', 'post', 'put', 'delete', 'options', 'trace', 'patch']
 const isMaybeHttpMethod = Match.Where(x => !x || httpMethods.includes(x))
-
+const noop = () => {}
 function handleError (res, { error, title, description, code, info }) {
-  res.writeHead(code || 500, { 'Content-Type': 'application/json' })
-  const body = JSON.stringify({
-    title: title,
-    description: description,
+  res.status(code || 500)
+  res.set({ 'Content-Type': 'application/json' })
+  res.json({
+    title,
+    description,
     info: info || (error && error.message)
-  }, null, 0)
-  res.end(body)
+  })
 }
 
 function registerHandler ({ app, path, method, handler }) {
   // ensure the method exists
   if (method && !Object.prototype.hasOwnProperty.call(app, method)) {
-    app.defineMethod(method)
+    throw new TypeError(`Undefined method "${method}"`)
   }
 
   const args = []
@@ -41,36 +41,10 @@ function registerHandler ({ app, path, method, handler }) {
       return app.trace(...args)
     case 'patch':
       return app.patch(...args)
+    case 'delete':
+      return app.delete(...args)
     default:
       return app.use(...args)
-  }
-}
-
-function getRequestParams (req) {
-  switch (req.method.toLowerCase()) {
-    case 'post':
-    case 'put':
-    case 'patch':
-      return Object.assign({}, req.body)
-    case 'get':
-      return Object.assign({}, req.query)
-    default:
-      return Object.assign({}, req.query, req.body)
-  }
-}
-
-function addRequestParams (req, obj) {
-  switch (req.method.toLowerCase()) {
-    case 'post':
-    case 'put':
-    case 'patch':
-      return Object.assign(req.body, obj)
-    case 'get':
-      return Object.assign(req.query, obj)
-    default:
-      Object.assign(req.query, obj)
-      Object.assign(req.body, obj)
-      return Object.assign({}, req.query, req.body)
   }
 }
 
@@ -83,14 +57,15 @@ function addRequestParams (req, obj) {
  * @return {function({path?: *, schema?: *, method?: *, run?: *, validate?: *, onError?: *, middleware?: *}): handler}
  *  a factory-method to create all routes by given configs
  */
-export const createHTTPFactory = ({ schemaFactory, onError, isRaw, ...globalMiddleware } = {}) => {
+export const createHTTPFactory = ({ schemaFactory, onError, isRaw, debug: globalDebug, ...globalMiddleware } = {}) => {
   check(schemaFactory, Match.Maybe(Function))
   check(onError, Match.Maybe(Function))
   check(isRaw, Match.Maybe(Boolean))
+  check(globalDebug, Match.Maybe(Function))
 
   const isRequiredSchema = schemaFactory ? Object : Match.Maybe(Object)
-  const app = isRaw ? WebApp.rawConnectHandlers : WebApp.connectHandlers
-  const globalErrorHook = onError || (() => {})
+  const app = isRaw ? WebApp.rawHandlers : WebApp.handlers
+  const globalErrorHook = onError ?? noop
 
   Object.values(globalMiddleware).forEach(gmw => {
     check(gmw, Function)
@@ -108,46 +83,55 @@ export const createHTTPFactory = ({ schemaFactory, onError, isRaw, ...globalMidd
    * @param middleware
    * @return {handler}
    */
-  const routeHandler = ({ path, schema = {}, method = '', run, validate, onError, ...middleware }) => {
+  const routeHandler = ({ path, schema = {}, method = '', run, validate, onError, debug: localDebug, ...middleware }) => {
     check(path, Match.Maybe(String))
     check(schema, isRequiredSchema)
     check(method, isMaybeHttpMethod)
     check(validate, Match.Maybe(Function))
     check(onError, Match.Maybe(Function))
     check(run, Function)
+    check(localDebug, Match.Maybe(Function))
 
+    const debug = localDebug ?? globalDebug ?? (() => {})
     const localErrorHook = onError || globalErrorHook
     const errorHook = async e => localErrorHook(e, method, path)
 
     Object.values(middleware).forEach(mw => {
       check(mw, Function)
+      debug(`[${method} ${path}]: Registering middleware`, mw)
       registerHandler({ app, path, method, handler: mw })
     })
 
     // enable to run validation on the request parameters (query or body)
 
-    let validateFn = validate || (() => {})
+    let validateFn = validate ?? noop
     if (!validate && schemaFactory) {
+      debug(`[${method} ${path}]: Creating validation schemaasync () => {`, schema)
       const validationSchema = schemaFactory(schema)
       validateFn = function (document = {}) {
+        debug(`[${method} ${path}]: Validating request parameters with schemaasync () => {`, document)
         validationSchema.validate(document)
       }
     }
 
-    const handler = function (req, res, next) {
+    const handler = async function (req, res, next) {
       // end the request here, if it's a preflight
+      // debug(`[${method} ${path}]: Received request`, req)
       if (isPreflight(req)) {
-        res.writeHead(200)
+        debug(`[${method} ${path}]: Handling preflight request`)
+        res.status(200)
         return res.end()
       }
 
       // then we validate the query / body or end
-      let requestParams
       try {
-        requestParams = getRequestParams(req)
-        validateFn(requestParams || {})
+        req.data = req.data ?? {}
+        Object.assign(req.data, req.query, req.params, req.body)
+        debug(`[${method} ${path}]: Validating request parameters`, req.data)
+        validateFn(req.data || {})
       } catch (validationError) {
-        errorHook(validationError)
+        debug(`[${method} ${path}]: Validation error`, validationError.message)
+        await errorHook(validationError)
 
         return handleError(res, {
           error: validationError,
@@ -176,23 +160,24 @@ export const createHTTPFactory = ({ schemaFactory, onError, isRaw, ...globalMidd
          * @param info
          * @param logError
          */
-        error: ({ error, code, title, description, info }) => {
-          errorHook(error)
+        error: async ({ error, code, title, description, info }) => {
+          await errorHook(error)
           handleError(res, { error, code, title, description, info })
         },
 
         /**
          * Return the current route data from query or body or add it to
          * them for the next middleware
-         * @param value {Object} optional, name of the value object
+         * @param value {object?} optional object to add to the current params of the request
          * @return {object} the current params of the request
          */
         data: (value) => {
-          if (value) {
-            check(value, Object)
-            requestParams = addRequestParams(req, value)
+          if (typeof value === 'object' && value !== null) {
+            debug(`[${method} ${path}]: Adding data to request parameters`, value)
+            Object.assign(req.data, value)
           }
-          return requestParams
+          debug(`[${method} ${path}]: Getting request parameters`, req.data)
+          return { ...req.data } // always return copy of data
         },
         /**
          * Logs args to to the console
@@ -203,10 +188,11 @@ export const createHTTPFactory = ({ schemaFactory, onError, isRaw, ...globalMidd
         }
       }
 
+      debug(`[${method} ${path}]: calling route handlerasync () => {`)
       try {
-        result = run.call(environment, req, res, nextWrapper)
+        result = await run.call(environment, req, res, nextWrapper)
       } catch (invocationError) {
-        errorHook(invocationError)
+        await errorHook(invocationError)
 
         return handleError(res, {
           error: invocationError,
@@ -218,7 +204,7 @@ export const createHTTPFactory = ({ schemaFactory, onError, isRaw, ...globalMidd
 
       // at this point we may skip, because the user has already written the request
       // inside the run method on their own behalf
-      if (nextCalled || res._headerSent) return
+      if (nextCalled || res.headersSent) return
 
       // if the function has no return value,
       // we assume to pass on to the next handler
@@ -226,13 +212,9 @@ export const createHTTPFactory = ({ schemaFactory, onError, isRaw, ...globalMidd
       // explicit, such as null, [], {}, etc.
       if (typeof result === 'undefined') return next()
 
-      res.writeHead(200, { 'Content-Type': 'application/json' })
-
-      if (typeof result !== 'string') {
-        return res.end(EJSON.stringify(result))
-      } else {
-        return res.end(result)
-      }
+      res.status(200)
+      res.set({ 'Content-Type': 'application/json' })
+      return res.send(EJSON.stringify(result))
     }
 
     registerHandler({ app, method, path, handler })

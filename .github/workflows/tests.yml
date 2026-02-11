@@ -1,0 +1,69 @@
+name: Test suite
+
+on:
+  push:
+    branches:
+      - master
+      - develop
+  pull_request:
+
+jobs:
+  lintcode:
+    name: Javascript lint
+    runs-on: ubuntu-latest
+    steps:
+      - name: checkout
+        uses: actions/checkout@v4
+
+      - name: setup node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: cache dependencies
+        uses: actions/cache@v4
+        with:
+          path: ~/.npm
+          key: ${{ runner.os }}-node-${{ hashFiles('**/package-lock.json') }}
+          restore-keys: |
+            ${{ runner.os }}-node-
+
+
+      - run: npm install -g standard snazzy
+      - run: standard  | snazzy
+
+  tests:
+    name: Meteor ${{ matrix.meteor }} tests
+    runs-on: ubuntu-latest
+    steps:
+
+      # CHECKOUTS
+      - name: Checkout
+        uses: actions/checkout@v4
+
+
+      # CACHING
+      - name: Install Meteor
+        id: cache-meteor-install
+        uses: actions/cache@v4
+        with:
+          path: ~/.meteor
+          key: v1-meteor-${{ hashFiles('.meteor/versions') }}
+          restore-keys: |
+            v1-meteor-
+
+      - name: Cache NPM dependencies
+        id: cache-meteor-npm
+        uses: actions/cache@v4
+        with:
+          path: ~/.npm
+          key: v1-npm-${{ hashFiles('package-lock.json') }}
+          restore-keys: |
+            v1-npm-
+
+      - name: Setup meteor
+        uses: meteorengineer/setup-meteor@v1
+        with:
+          meteor-release: '3.4'
+
+      - run: TEST_CLIENT=0 meteor test-packages ./ --once --driver-package meteortesting:mocha --port=3452
