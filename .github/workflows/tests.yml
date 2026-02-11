@@ -64,6 +64,6 @@ jobs:
       - name: Setup meteor
         uses: meteorengineer/setup-meteor@v1
         with:
-          meteor-release: '4.3'
+          meteor-release: '3.4'
 
       - run: TEST_CLIENT=0 meteor test-packages ./ --once --driver-package meteortesting:mocha --port=3452
